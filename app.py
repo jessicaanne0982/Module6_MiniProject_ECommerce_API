@@ -1,14 +1,18 @@
 from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import select
 from flask_marshmallow import Marshmallow
+from flask_cors import CORS
 from marshmallow import fields, validate
 from marshmallow import ValidationError
 from datetime import datetime
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:my_password@localhost/e_com_api_db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:Braxton0630!@localhost/e_com_api_db'
+
 db = SQLAlchemy(app)
 ma = Marshmallow(app)
+CORS(app)
 
 class CustomerSchema(ma.Schema):
     name = fields.String(required=True)
@@ -16,7 +20,7 @@ class CustomerSchema(ma.Schema):
     phone = fields.String(required=True)
 
     class Meta:
-        fields = ('name', 'email', 'phone')
+        fields = ('name', 'email', 'phone', 'id')
 
 class ProductSchema(ma.Schema):
     name = fields.String(required=True)
@@ -33,6 +37,16 @@ class CustomerAccountSchema(ma.Schema):
     class Meta:
         fields = ('username', 'password')
 
+class OrderSchema(ma.Schema):
+    id = fields.Integer()
+    date = fields.Date()
+    customer_id = fields.Integer()
+
+    products = fields.List(fields.Integer())  
+
+    class Meta:
+        fields = ('id', 'date', 'customer_id', 'products')
+
 customer_schema = CustomerSchema()
 customers_schema = CustomerSchema(many=True)
 
@@ -41,6 +55,9 @@ products_schema = ProductSchema(many=True)
 
 customer_account_schema = CustomerAccountSchema()
 customer_accounts_schema = CustomerSchema(many=True)
+
+order_schema = OrderSchema()
+orders_schema = OrderSchema(many=True)
 
 class Customer(db.Model):
     __tablename__ = 'Customers'
@@ -79,7 +96,7 @@ class Product(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(255), nullable=False)
     price = db.Column(db.Float, nullable=False)
-    quantity = db.Column(db.Integer, nullable=False, default=1)
+    quantity = db.Column(db.Integer, nullable=False)
 
 # END POINTS FOR CUSTOMER REQUESTS
 # View all Customers (For testing purposes)
@@ -103,18 +120,19 @@ def add_customer():
                             )
     db.session.add(new_customer)
     db.session.commit()
-    return jsonify({'message':'New customer successfully added'})
+    return jsonify({'message':'New customer successfully added'}), 201
 
 # Read Specific Customer Route (GET) - by-id
 # retrieve by unique id
-@app.route('/customers/by-id', methods=['GET'])
-def query_customer_by_id():
-    id = request.args.get('id')
-    customer = Customer.query.filter_by(id=id).first()
-    if customer:
+@app.route('/customers/<int:id>', methods=['GET'])
+def get_customer_by_id(id):
+    query = select(Customer).filter(Customer.id == id)
+    customer = db.session.execute(query).scalars().first()
+
+    if customer: 
         return customer_schema.jsonify(customer)
     else:
-        return jsonify({'message':'Customer not found'}), 404
+        return jsonify({"message": "Customer not found"}), 404
     
 # Update Customer - PUT
 @app.route('/customers/<int:id>', methods=['PUT'])
@@ -138,7 +156,7 @@ def delete_customer(id):
     customer = Customer.query.get_or_404(id)
     db.session.delete(customer)
     db.session.commit()
-    return jsonify({'message':'Customer has successfully been removed'})
+    return jsonify({'message':'Customer has successfully been removed'}), 200
    
 
 # END POINTS FOR CUSTOMER ACCOUNT REQUESTS    
@@ -213,13 +231,13 @@ def delete_customer_account(id):
 # END POINTS FOR PRODUCT REQUESTS
 # Add a new product - POST
 @app.route('/products', methods=['POST'])
-def add_new_product():
+def add_product():
     try:
         product_data = product_schema.load(request.json)
     except ValidationError as e:
         return jsonify(e.messages), 400
    
-    new_product = Product(name=product_data['name'], price=product_data['price'])
+    new_product = Product(name=product_data['name'], price=product_data['price'], quantity=product_data['quantity'])
 
     db.session.add(new_product)
     db.session.commit()
@@ -233,9 +251,8 @@ def get_all_products():
 
 # Update a Product - PUT
 @app.route('/products/<int:id>', methods=['PUT']) 
-def update_product(id):
+def update_products(id):
   product = Product.query.get_or_404(id)
- 
   try:
     product_data = product_schema.load(request.json)
   except ValidationError as e:
@@ -243,6 +260,7 @@ def update_product(id):
    
   product.name = product_data['name']
   product.price = product_data['price']
+  product.quantity = product_data['quantity']
  
   db.session.commit()
   return jsonify({'message':'Product has been successfully updated'}), 200
@@ -256,20 +274,57 @@ def delete_product(id):
   return jsonify({'message':'Product has successfully been deleted'}), 200
 
 # Get specific product details - GET
-@app.route('/products/by-id', methods=['GET'])
-def specific_product_details():
-  id = request.args.get('id')
-  product = Product.query.filter_by(id=id).first()
+@app.route('/products/<int:id>', methods=['GET'])
+def get_product_by_id(id):
+  query = select(Product).filter(Product.id == id)
+  product = db.session.execute(query).scalars().first()
+
   if product:
     return product_schema.jsonify(product)
   else:
     return jsonify({'message':'Product not found'}), 404
 
 # END POINTS FOR ORDER REQUESTS
+# View all orders - GET
+@app.route('/orders', methods=['GET'])
+def get_all_orders():
+  orders = Order.query.all()
+
+  response = []
+
+  for order in orders:
+    try:
+       
+      order_data = order_schema.dump(order)
+      customer = Customer.query.get(order.customer_id)
+
+      if customer:
+        order_data['customer_name'] = customer.name
+      else:
+        order_data['customer_name'] = 'Unknown'
+
+      products_info = []
+      for order_product in order.products:
+        product_info = {
+            'product_id': order_product.id,
+            'product_name': order_product.name,
+            'quantity': order_product.quantity
+        }
+        products_info.append(product_info)
+
+      order_data['products'] = products_info
+      response.append(order_data)
+    except Exception as e:
+       print(f"Error processing order {order.id}: {str(e)}")
+       continue
+
+  return jsonify(response)
+
 # Place new order - POST 
 @app.route('/orders', methods=['POST'])
 def place_order():
   data = request.get_json()
+  print("Received data:", data) # DELETE AFTER DEBUGGING
   customer_id = data.get('customer_id')
   products = data.get('products')
  
@@ -278,48 +333,41 @@ def place_order():
     return jsonify({"message": "Customer not found"}), 404
   
   new_order = Order(customer_id=customer_id, date=datetime.now())
+  db.session.add(new_order)
+  db.session.commit()
  
   for item in products:
     product_id = item.get('product_id')
-    quantity = item.get('quantity', )
+    quantity = item.get('quantity', 1)
+
     product = Product.query.get(product_id)
     if not product:
       return jsonify({"message": f"Product {product_id} not found"}), 404
     
-    #Add the products to the order
     new_order.products.append(product)
-  
-  # Add the new order to the table
-  db.session.add(new_order)
+    order_product_entry = order_product.insert().values(order_id=new_order.id, product_id=product.id, quantity=quantity)
+    db.session.execute(order_product_entry)
+    
   db.session.commit()
- 
-  return jsonify({'message':'Order placed successfully',
+
+  return jsonify({
                   'Order ID': new_order.id,
                   'Date': new_order.date,
                   'Customer ID': new_order.customer_id,
                   'Products': [{'product_id': product.id,
                                 'product_name': product.name,
-                                'quantity': quantity}]}), 201
-
+                                'quantity': item.get('quantity')}]
+    }), 201
 
 # Retrieve order details by order id - GET
-@app.route('/orders/by-id', methods=['GET'])
-def retrieve_order_details_by_id():
-  order_id = request.args.get('id')
-  order = Order.query.filter_by(id=order_id).first()
+@app.route('/orders/<int:id>', methods=['GET'])
+def retrieve_order_details_by_id(id):
+  order = Order.query.filter_by(id)
  
   if order:
-    return jsonify({'Order ID': order.id,
-                  'Date': order.date,
-                  'Customer ID': order.customer_id,
-                  'Products': [{'product_id': order_product.id,
-                                'product_name': order_product.name,
-                                'quantity': order_product.quantity} for order_product in order.products]}), 200 
+     return order_schema.jsonify(order), 200 
   else:
     return jsonify({'message':'Order not found'}), 404
-  
-
-  
   
 #Initialize the database and create tables
 with app.app_context():
