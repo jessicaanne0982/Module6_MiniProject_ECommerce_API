@@ -41,8 +41,7 @@ class OrderSchema(ma.Schema):
     id = fields.Integer()
     date = fields.Date()
     customer_id = fields.Integer()
-
-    products = fields.List(fields.Integer())  
+    products = fields.List(fields.Nested(ProductSchema))  
 
     class Meta:
         fields = ('id', 'date', 'customer_id', 'products')
@@ -324,7 +323,6 @@ def get_all_orders():
 @app.route('/orders', methods=['POST'])
 def place_order():
   data = request.get_json()
-  print("Received data:", data) # DELETE AFTER DEBUGGING
   customer_id = data.get('customer_id')
   products = data.get('products')
  
@@ -344,7 +342,6 @@ def place_order():
     if not product:
       return jsonify({"message": f"Product {product_id} not found"}), 404
     
-    new_order.products.append(product)
     order_product_entry = order_product.insert().values(order_id=new_order.id, product_id=product.id, quantity=quantity)
     db.session.execute(order_product_entry)
     
