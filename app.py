@@ -8,7 +8,7 @@ from marshmallow import ValidationError
 from datetime import datetime
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:Braxton0630!@localhost/e_com_api_db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:my_password@localhost/e_com_api_db'
 
 db = SQLAlchemy(app)
 ma = Marshmallow(app)
